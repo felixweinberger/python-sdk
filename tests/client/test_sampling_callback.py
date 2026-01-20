@@ -1,10 +1,9 @@
 import pytest
 
+from mcp.client import Client
 from mcp.client.session import ClientSession
+from mcp.server.fastmcp import FastMCP
 from mcp.shared.context import RequestContext
-from mcp.shared.memory import (
-    create_connected_server_and_client_session as create_session,
-)
 from mcp.types import (
     CreateMessageRequestParams,
     CreateMessageResult,
@@ -15,8 +14,6 @@ from mcp.types import (
 
 @pytest.mark.anyio
 async def test_sampling_callback():
-    from mcp.server.fastmcp import FastMCP
-
     server = FastMCP("test")
 
     callback_return = CreateMessageResult(
@@ -48,11 +45,8 @@ async def test_sampling_callback():
         return True
 
     # Test with sampling callback
-    async with create_session(
-        server._mcp_server, sampling_callback=sampling_callback
-    ) as client_session:
-        # Make a request to trigger sampling callback
-        result = await client_session.call_tool(
+    async with Client(server, sampling_callback=sampling_callback) as client:
+        result = await client.call_tool(
             "test_sampling", {"message": "Test message for sampling"}
         )
         assert result.isError is False
@@ -60,9 +54,8 @@ async def test_sampling_callback():
         assert result.content[0].text == "true"
 
     # Test without sampling callback
-    async with create_session(server._mcp_server) as client_session:
-        # Make a request to trigger sampling callback
-        result = await client_session.call_tool(
+    async with Client(server) as client:
+        result = await client.call_tool(
             "test_sampling", {"message": "Test message for sampling"}
         )
         assert result.isError is True

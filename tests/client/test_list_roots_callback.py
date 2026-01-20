@@ -1,19 +1,16 @@
 import pytest
 from pydantic import FileUrl
 
+from mcp.client import Client
 from mcp.client.session import ClientSession
+from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Context
 from mcp.shared.context import RequestContext
-from mcp.shared.memory import (
-    create_connected_server_and_client_session as create_session,
-)
 from mcp.types import ListRootsResult, Root, TextContent
 
 
 @pytest.mark.anyio
 async def test_list_roots_callback():
-    from mcp.server.fastmcp import FastMCP
-
     server = FastMCP("test")
 
     callback_return = ListRootsResult(
@@ -41,23 +38,15 @@ async def test_list_roots_callback():
         return True
 
     # Test with list_roots callback
-    async with create_session(
-        server._mcp_server, list_roots_callback=list_roots_callback
-    ) as client_session:
-        # Make a request to trigger sampling callback
-        result = await client_session.call_tool(
-            "test_list_roots", {"message": "test message"}
-        )
+    async with Client(server, list_roots_callback=list_roots_callback) as client:
+        result = await client.call_tool("test_list_roots", {"message": "test message"})
         assert result.isError is False
         assert isinstance(result.content[0], TextContent)
         assert result.content[0].text == "true"
 
     # Test without list_roots callback
-    async with create_session(server._mcp_server) as client_session:
-        # Make a request to trigger sampling callback
-        result = await client_session.call_tool(
-            "test_list_roots", {"message": "test message"}
-        )
+    async with Client(server) as client:
+        result = await client.call_tool("test_list_roots", {"message": "test message"})
         assert result.isError is True
         assert isinstance(result.content[0], TextContent)
         assert (

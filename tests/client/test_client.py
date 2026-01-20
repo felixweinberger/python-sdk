@@ -1,6 +1,13 @@
 """Tests for the high-level Client class."""
 
+import sys
+
 import pytest
+
+if sys.version_info >= (3, 11):
+    from builtins import ExceptionGroup
+else:
+    from exceptiongroup import ExceptionGroup
 
 from mcp.client import Client
 from mcp.client.transports import HttpTransport, InMemoryTransport

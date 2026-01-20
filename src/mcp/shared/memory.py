@@ -1,24 +1,27 @@
 """
-In-memory transports
+In-memory transports for low-level protocol testing.
+
+For most use cases, prefer using :class:`mcp.client.Client` with a
+Server or FastMCP instance::
+
+    from mcp.client import Client
+    from mcp.server import FastMCP
+
+    server = FastMCP("my-server")
+
+    async with Client(server) as client:
+        tools = await client.list_tools()
+
+The helpers in this module are only needed for low-level protocol testing
+with mock servers that need direct stream access.
 """
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import timedelta
-from typing import Any
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
-import mcp.types as types
-from mcp.client.session import (
-    ClientSession,
-    ListRootsFnT,
-    LoggingFnT,
-    MessageHandlerFnT,
-    SamplingFnT,
-)
-from mcp.server import Server
 from mcp.shared.message import SessionMessage
 
 MessageStream = tuple[
@@ -33,6 +36,9 @@ async def create_client_server_memory_streams() -> (
 ):
     """
     Creates a pair of bidirectional memory streams for client-server communication.
+
+    This is a low-level helper for protocol testing with mock servers.
+    For normal client usage, use :class:`mcp.client.Client` instead.
 
     Returns:
         A tuple of (client_streams, server_streams) where each is a tuple of
@@ -56,50 +62,3 @@ async def create_client_server_memory_streams() -> (
         server_to_client_send,
     ):
         yield client_streams, server_streams
-
-
-@asynccontextmanager
-async def create_connected_server_and_client_session(
-    server: Server[Any],
-    read_timeout_seconds: timedelta | None = None,
-    sampling_callback: SamplingFnT | None = None,
-    list_roots_callback: ListRootsFnT | None = None,
-    logging_callback: LoggingFnT | None = None,
-    message_handler: MessageHandlerFnT | None = None,
-    client_info: types.Implementation | None = None,
-    raise_exceptions: bool = False,
-) -> AsyncGenerator[ClientSession, None]:
-    """Creates a ClientSession that is connected to a running MCP server."""
-    async with create_client_server_memory_streams() as (
-        client_streams,
-        server_streams,
-    ):
-        client_read, client_write = client_streams
-        server_read, server_write = server_streams
-
-        # Create a cancel scope for the server task
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(
-                lambda: server.run(
-                    server_read,
-                    server_write,
-                    server.create_initialization_options(),
-                    raise_exceptions=raise_exceptions,
-                )
-            )
-
-            try:
-                async with ClientSession(
-                    read_stream=client_read,
-                    write_stream=client_write,
-                    read_timeout_seconds=read_timeout_seconds,
-                    sampling_callback=sampling_callback,
-                    list_roots_callback=list_roots_callback,
-                    logging_callback=logging_callback,
-                    message_handler=message_handler,
-                    client_info=client_info,
-                ) as client_session:
-                    await client_session.initialize()
-                    yield client_session
-            finally:
-                tg.cancel_scope.cancel()

@@ -1,15 +1,13 @@
-from collections.abc import AsyncGenerator
-
 import anyio
 import pytest
 
 import mcp.types as types
+from mcp.client import Client
 from mcp.client.session import ClientSession
 from mcp.server.lowlevel.server import Server
 from mcp.shared.exceptions import McpError
 from mcp.shared.memory import (
     create_client_server_memory_streams,
-    create_connected_server_and_client_session,
 )
 from mcp.types import (
     CancelledNotification,
@@ -25,32 +23,21 @@ def mcp_server() -> Server:
     return Server(name="test server")
 
 
-@pytest.fixture
-async def client_connected_to_server(
-    mcp_server: Server,
-) -> AsyncGenerator[ClientSession, None]:
-    async with create_connected_server_and_client_session(mcp_server) as client_session:
-        yield client_session
-
-
 @pytest.mark.anyio
-async def test_in_flight_requests_cleared_after_completion(
-    client_connected_to_server: ClientSession,
-):
+async def test_in_flight_requests_cleared_after_completion(mcp_server: Server):
     """Verify that _in_flight is empty after all requests complete."""
-    # Send a request and wait for response
-    response = await client_connected_to_server.send_ping()
-    assert isinstance(response, EmptyResult)
+    async with Client(mcp_server) as client:
+        # Send a request and wait for response
+        response = await client.send_ping()
+        assert isinstance(response, EmptyResult)
 
-    # Verify _in_flight is empty
-    assert len(client_connected_to_server._in_flight) == 0
+        # Verify _in_flight is empty (access underlying session)
+        assert len(client.session._in_flight) == 0
 
 
 @pytest.mark.anyio
 async def test_request_cancellation():
     """Test that requests can be cancelled while in-flight."""
-    # The tool is already registered in the fixture
-
     ev_tool_called = anyio.Event()
     ev_cancelled = anyio.Event()
     request_id = None
@@ -83,7 +70,7 @@ async def test_request_cancellation():
 
         return server
 
-    async def make_request(client_session):
+    async def make_request(client_session: ClientSession):
         nonlocal ev_cancelled
         try:
             await client_session.send_request(
@@ -103,11 +90,9 @@ async def test_request_cancellation():
             assert "Request cancelled" in str(e)
             ev_cancelled.set()
 
-    async with create_connected_server_and_client_session(
-        make_server()
-    ) as client_session:
+    async with Client(make_server()) as client:
         async with anyio.create_task_group() as tg:
-            tg.start_soon(make_request, client_session)
+            tg.start_soon(make_request, client.session)
 
             # Wait for the request to be in-flight
             with anyio.fail_after(1):  # Timeout after 1 second
@@ -115,7 +100,7 @@ async def test_request_cancellation():
 
             # Send cancellation notification
             assert request_id is not None
-            await client_session.send_notification(
+            await client.session.send_notification(
                 ClientNotification(
                     CancelledNotification(
                         method="notifications/cancelled",

@@ -3,9 +3,8 @@ from typing import Literal
 import pytest
 
 import mcp.types as types
-from mcp.shared.memory import (
-    create_connected_server_and_client_session as create_session,
-)
+from mcp.client import Client
+from mcp.server.fastmcp import FastMCP
 from mcp.shared.session import RequestResponder
 from mcp.types import (
     LoggingMessageNotificationParams,
@@ -23,8 +22,6 @@ class LoggingCollector:
 
 @pytest.mark.anyio
 async def test_logging_callback():
-    from mcp.server.fastmcp import FastMCP
-
     server = FastMCP("test")
     logging_collector = LoggingCollector()
 
@@ -56,19 +53,19 @@ async def test_logging_callback():
         if isinstance(message, Exception):
             raise message
 
-    async with create_session(
-        server._mcp_server,
+    async with Client(
+        server,
         logging_callback=logging_collector,
         message_handler=message_handler,
-    ) as client_session:
+    ) as client:
         # First verify our test tool works
-        result = await client_session.call_tool("test_tool", {})
+        result = await client.call_tool("test_tool", {})
         assert result.isError is False
         assert isinstance(result.content[0], TextContent)
         assert result.content[0].text == "true"
 
         # Now send a log message via our tool
-        log_result = await client_session.call_tool(
+        log_result = await client.call_tool(
             "test_tool_with_log",
             {
                 "message": "Test log message",

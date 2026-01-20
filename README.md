@@ -711,7 +711,53 @@ Caution: The `mcp run` and `mcp dev` tool doesn't support low-level server.
 
 ### Writing MCP Clients
 
-The SDK provides a high-level client interface for connecting to MCP servers using various [transports](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports):
+The SDK provides a high-level `Client` class for connecting to MCP servers with automatic transport inference:
+
+```python
+from mcp.client import Client
+from mcp.server.fastmcp import FastMCP
+
+# Connect directly to a FastMCP server instance (in-memory)
+server = FastMCP("my-server")
+
+@server.tool()
+def greet(name: str) -> str:
+    """Greet someone."""
+    return f"Hello, {name}!"
+
+async def main():
+    async with Client(server) as client:
+        # List available tools
+        tools = await client.list_tools()
+
+        # Call a tool
+        result = await client.call_tool("greet", {"name": "World"})
+        print(result.content[0].text)  # "Hello, World!"
+
+        # Access the underlying session for advanced operations
+        ping_result = await client.session.send_ping()
+```
+
+The `Client` class supports multiple target types:
+- **FastMCP/Server instance**: Uses in-memory transport for direct communication
+- **URL string**: Uses HTTP transport for remote connections
+- **Transport instance**: Uses a custom transport directly
+
+```python
+# Connect to an HTTP server
+async with Client("http://localhost:8000/mcp") as client:
+    tools = await client.list_tools()
+
+# Use a custom transport
+from mcp.client.transports import SSETransport
+transport = SSETransport(url="http://localhost:8000/sse")
+async with Client(transport) as client:
+    tools = await client.list_tools()
+```
+
+#### Low-Level Client Interface
+
+For more control over the connection, you can use the low-level `ClientSession` directly with specific [transports](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports):
 
 ```python
 from mcp import ClientSession, StdioServerParameters, types
