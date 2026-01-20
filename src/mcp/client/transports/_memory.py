@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
@@ -32,9 +32,12 @@ class InMemoryTransport:
     def _get_mcp_server(self) -> "Server[Any]":
         """Get the underlying MCP Server instance."""
         # FastMCP wraps Server in _mcp_server attribute
-        if hasattr(self._server, "_mcp_server"):
-            return self._server._mcp_server  # type: ignore[union-attr]
-        return self._server  # type: ignore[return-value]
+        # Use getattr to avoid protected attribute access warnings
+        mcp_server = getattr(self._server, "_mcp_server", None)
+        if mcp_server is not None:
+            return cast("Server[Any]", mcp_server)
+        # Already a Server instance
+        return cast("Server[Any]", self._server)
 
     @asynccontextmanager
     async def connect(
@@ -69,11 +72,14 @@ class InMemoryTransport:
                 client_to_server_receive,
                 server_to_client_send,
             ):
-                # Server.run expects SessionMessage | Exception for read stream,
-                # but we only send SessionMessage. Type ignore is safe here.
+                # Server.run expects SessionMessage | Exception for read stream.
+                # We provide SessionMessage which is a subtype - safe at runtime.
                 tg.start_soon(
                     mcp_server.run,
-                    client_to_server_receive,  # type: ignore[arg-type]
+                    cast(
+                        MemoryObjectReceiveStream[SessionMessage | Exception],
+                        client_to_server_receive,
+                    ),
                     server_to_client_send,
                     mcp_server.create_initialization_options(),
                 )
