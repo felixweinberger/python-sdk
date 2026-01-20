@@ -51,11 +51,13 @@ class InMemoryTransport:
             A tuple of (read_stream, write_stream) for bidirectional communication.
         """
         # Create streams for both directions
+        # Server-to-client can contain exceptions (for transport errors)
         server_to_client_send, server_to_client_receive = (
             anyio.create_memory_object_stream[SessionMessage | Exception](1)
         )
+        # Client-to-server only contains SessionMessage
         client_to_server_send, client_to_server_receive = (
-            anyio.create_memory_object_stream[SessionMessage | Exception](1)
+            anyio.create_memory_object_stream[SessionMessage](1)
         )
 
         mcp_server = self._get_mcp_server()
@@ -67,9 +69,11 @@ class InMemoryTransport:
                 client_to_server_receive,
                 server_to_client_send,
             ):
+                # Server.run expects SessionMessage | Exception for read stream,
+                # but we only send SessionMessage. Type ignore is safe here.
                 tg.start_soon(
                     mcp_server.run,
-                    client_to_server_receive,
+                    client_to_server_receive,  # type: ignore[arg-type]
                     server_to_client_send,
                     mcp_server.create_initialization_options(),
                 )

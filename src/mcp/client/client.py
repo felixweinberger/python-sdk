@@ -1,9 +1,9 @@
 """High-level MCP Client with transport abstraction."""
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Union
+from typing import Any
 
 import mcp.types as types
 from mcp.client.session import (
@@ -14,13 +14,11 @@ from mcp.client.session import (
     SamplingFnT,
 )
 from mcp.client.transports import HttpTransport, InMemoryTransport, Transport
-
-if TYPE_CHECKING:
-    from mcp.server import FastMCP
-    from mcp.server.lowlevel.server import Server
+from mcp.server import FastMCP
+from mcp.server.lowlevel.server import Server
 
 # Type alias for valid Client targets
-ClientTarget = Union["Server[Any]", "FastMCP", Transport, str]
+ClientTarget = Server[Any] | FastMCP | Transport | str
 
 
 def _infer_transport(target: ClientTarget) -> Transport:
@@ -42,14 +40,13 @@ def _infer_transport(target: ClientTarget) -> Transport:
     if isinstance(target, Transport):
         return target
 
-    # Check for Server or FastMCP (has _mcp_server or run method)
-    if hasattr(target, "_mcp_server") or (
-        hasattr(target, "run") and hasattr(target, "create_initialization_options")
-    ):
-        return InMemoryTransport(target)  # type: ignore[arg-type]
+    # Check for Server or FastMCP using proper isinstance checks
+    if isinstance(target, Server | FastMCP):
+        return InMemoryTransport(target)
 
-    # Check for URL string
-    if isinstance(target, str):
+    # Check for URL string (explicit check for clarity even though type narrowing
+    # already excludes other types at this point)
+    if isinstance(target, str):  # pyright: ignore[reportUnnecessaryIsInstance]
         return HttpTransport(url=target)
 
     raise TypeError(
@@ -116,6 +113,7 @@ class Client:
         self._message_handler = message_handler
         self._client_info = client_info
         self._session: ClientSession | None = None
+        self._context: AbstractAsyncContextManager[Client] | None = None
 
     @property
     def session(self) -> ClientSession:
@@ -164,12 +162,19 @@ class Client:
 
     async def __aenter__(self) -> "Client":
         """Enter the async context manager."""
+        if self._context is not None:
+            raise RuntimeError("Client context manager is not reentrant")
         self._context = self.connect()
         return await self._context.__aenter__()
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Exit the async context manager."""
-        await self._context.__aexit__(exc_type, exc_val, exc_tb)
+        if self._context is None:
+            raise RuntimeError("Client context manager was not entered")
+        try:
+            await self._context.__aexit__(exc_type, exc_val, exc_tb)
+        finally:
+            self._context = None
 
     # Delegate common methods to session for convenience
 

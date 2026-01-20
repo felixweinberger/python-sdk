@@ -38,6 +38,74 @@ class TestClientSessionAccess:
             _ = client.session
 
 
+class TestClientContextManagerEdgeCases:
+    """Tests for Client context manager edge cases."""
+
+    @pytest.mark.anyio
+    async def test_double_entry_raises_error(self) -> None:
+        """Entering context manager twice should raise RuntimeError."""
+        server = FastMCP(name="test")
+        client = Client(server)
+
+        async with client:
+            with pytest.raises(RuntimeError, match="not reentrant"):
+                await client.__aenter__()
+
+    @pytest.mark.anyio
+    async def test_exit_without_entry_raises_error(self) -> None:
+        """Exiting without entering should raise RuntimeError."""
+        server = FastMCP(name="test")
+        client = Client(server)
+
+        with pytest.raises(RuntimeError, match="was not entered"):
+            await client.__aexit__(None, None, None)
+
+    @pytest.mark.anyio
+    async def test_context_reusable_after_exit(self) -> None:
+        """Client should be reusable after proper exit."""
+        server = FastMCP(name="test")
+        client = Client(server)
+
+        # First use
+        async with client:
+            assert client._session is not None
+
+        # Verify cleanup
+        assert client._session is None
+        assert client._context is None
+
+        # Second use should work
+        async with client:
+            assert client._session is not None
+
+    @pytest.mark.anyio
+    async def test_context_cleanup_on_error(self) -> None:
+        """Client context should be cleaned up even on error."""
+        server = FastMCP(name="test")
+        client = Client(server)
+
+        # Exceptions get wrapped in ExceptionGroup by anyio's TaskGroup
+        with pytest.raises(ExceptionGroup) as exc_info:
+            async with client:
+                assert client._session is not None
+                raise ValueError("test error")
+
+        # Verify the original error is in the group
+        assert any(
+            isinstance(e, ValueError) and "test error" in str(e)
+            for e in exc_info.value.exceptions
+            if isinstance(e, ValueError)
+        ) or any(
+            isinstance(e, ExceptionGroup)
+            and any(isinstance(inner, ValueError) for inner in e.exceptions)
+            for e in exc_info.value.exceptions
+        )
+
+        # Context should be cleaned up
+        assert client._session is None
+        assert client._context is None
+
+
 class TestClientWithFastMCP:
     """Tests for Client with FastMCP server."""
 
